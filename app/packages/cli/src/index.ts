@@ -2,13 +2,27 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { compilePlan } from '@smartplan/compiler';
 import { formatAgentResponse } from '@smartplan/critique';
-import { startReviewServer } from '@smartplan/server';
+import { startReviewServer, type SourceEdit } from '@smartplan/server';
 import { toClaudeHookResponse } from './claudeHookResponse.ts';
 
 const [command, ...rest] = process.argv.slice(2);
 
 // The built single-file UI lives next to this package, regardless of the caller's cwd.
 const UI_HTML_PATH = resolve(import.meta.dir, '../../ui/dist/index.html');
+
+// Persist an inline edit to plan-src/<pageId>.md by splicing the given line range, then recompile
+// so the served payload stays in lockstep with the datastore.
+function makeEditHandler(srcDir: string) {
+  return (edit: SourceEdit) => {
+    const mdPath = resolve(srcDir, 'plan-src', `${edit.pageId}.md`);
+    const lines = readFileSync(mdPath, 'utf8').split('\n');
+    const replacement = edit.text.split('\n');
+    const removed = edit.endLine - edit.startLine + 1;
+    lines.splice(edit.startLine - 1, removed, ...replacement);
+    writeFileSync(mdPath, lines.join('\n'));
+    return { lineDelta: replacement.length - removed, plan: compilePlan(srcDir) };
+  };
+}
 
 function compileCommand(args: string[]): void {
   const srcDir = resolve(args[0] ?? '.');
@@ -25,7 +39,11 @@ function compileCommand(args: string[]): void {
 async function serveCommand(args: string[]): Promise<void> {
   const srcDir = resolve(args[0] ?? '.');
   const plan = compilePlan(srcDir);
-  const server = startReviewServer({ plan, html: readFileSync(UI_HTML_PATH, 'utf8') });
+  const server = startReviewServer({
+    plan,
+    html: readFileSync(UI_HTML_PATH, 'utf8'),
+    onEditSource: makeEditHandler(srcDir),
+  });
   console.log(`SmartPlan review server: ${server.url}`);
   console.log('Open it in your browser. Waiting for you to Approve or Incorporate…');
   openBrowser(server.url);
@@ -46,8 +64,13 @@ async function hookClaudeCommand(): Promise<void> {
     process.stdout.write('{}');
     return;
   }
-  const plan = compilePlan(resolve(srcEnv));
-  const server = startReviewServer({ plan, html: readFileSync(UI_HTML_PATH, 'utf8') });
+  const srcDir = resolve(srcEnv);
+  const plan = compilePlan(srcDir);
+  const server = startReviewServer({
+    plan,
+    html: readFileSync(UI_HTML_PATH, 'utf8'),
+    onEditSource: makeEditHandler(srcDir),
+  });
   process.stderr.write(`SmartPlan review: ${server.url}\n`);
   openBrowser(server.url);
   const submission = await server.result;

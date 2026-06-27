@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@smartplan/shared": "workspace:*"
+    "@smartplan/shared": "workspace:*",
+    "zod": "^3.23.8"
   }
 }

@@ -15,6 +15,8 @@ interface UseAnnotationsArgs {
   activePageId: string;
   pageThreads: CommentThread[];
   activeThreadId: string | null;
+  /** When false (e.g. inline-edit mode), text selection does not create annotations. */
+  enabled: boolean;
 }
 
 interface UseAnnotationsResult {
@@ -31,7 +33,7 @@ const HL_DRAFT = 'smartplan-draft';
 const HL_ACTIVE = 'smartplan-active';
 
 export function useAnnotations(args: UseAnnotationsArgs): UseAnnotationsResult {
-  const { containerRef, layoutRef, activePageId, pageThreads, activeThreadId } = args;
+  const { containerRef, layoutRef, activePageId, pageThreads, activeThreadId, enabled } = args;
   const [draft, setDraft] = useState<DraftAnchor | null>(null);
   const [threadTops, setThreadTops] = useState<Map<string, number>>(new Map());
   const [draftTop, setDraftTop] = useState<number | null>(null);
@@ -47,6 +49,7 @@ export function useAnnotations(args: UseAnnotationsArgs): UseAnnotationsResult {
 
   // Selection → draft anchor.
   const onMouseUp = useCallbackRef(() => {
+    if (!enabled) return;
     const container = containerRef.current;
     const index = indexRef.current;
     if (!container || !index) return;

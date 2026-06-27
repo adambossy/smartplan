@@ -48,6 +48,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@smartplan/shared": "workspace:*",
+        "zod": "^3.23.8",
       },
     },
     "packages/shared": {

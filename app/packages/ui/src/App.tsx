@@ -8,6 +8,7 @@ import { PageView } from './components/PageView.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
 import { SubmitBar } from './components/SubmitBar.tsx';
 import { loadCompiledPlan } from './data.ts';
+import { useInlineEdit } from './useInlineEdit.ts';
 import { useReview } from './state.ts';
 
 export function App() {
@@ -30,6 +31,7 @@ function Review({ plan }: { plan: CompiledPlan }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<AnnotationStatus | null>(null);
 
@@ -45,7 +47,10 @@ function Review({ plan }: { plan: CompiledPlan }) {
     activePageId: page.id,
     pageThreads,
     activeThreadId,
+    enabled: !editing,
   });
+
+  useInlineEdit({ containerRef: contentRef, editing, pageId: page.id });
 
   const navigate = (id: string) => {
     setActiveThreadId(null);
@@ -71,7 +76,19 @@ function Review({ plan }: { plan: CompiledPlan }) {
   };
 
   return (
-    <div className="sp-layout">
+    <div className={`sp-layout${editing ? ' sp-editing' : ''}`}>
+      <button
+        type="button"
+        className={`sp-edit-toggle${editing ? ' is-on' : ''}`}
+        onClick={() => {
+          setActiveThreadId(null);
+          setEditing((v) => !v);
+        }}
+        title={editing ? 'Finish editing and return to commenting' : 'Edit the plan text inline'}
+      >
+        {editing ? 'Done Editing' : 'Edit Text'}
+      </button>
+
       <Sidebar
         plan={plan}
         activePageId={page.id}

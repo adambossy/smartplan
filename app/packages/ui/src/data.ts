@@ -13,3 +13,25 @@ export async function loadCompiledPlan(): Promise<CompiledPlan> {
   }
   throw new Error('could not load compiled plan from /payload or /compiled-plan.json');
 }
+
+export interface SourceEdit {
+  pageId: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+}
+
+/** Live-sync an inline edit to the datastore. Returns the line-count delta, or null if no server. */
+export async function postSourceEdit(edit: SourceEdit): Promise<{ lineDelta: number } | null> {
+  try {
+    const res = await fetch('/source', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(edit),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as { lineDelta: number };
+  } catch {
+    return null;
+  }
+}
