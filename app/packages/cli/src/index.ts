@@ -4,6 +4,7 @@ import { compilePlan } from '@smartplan/compiler';
 import { formatAgentResponse } from '@smartplan/critique';
 import { startReviewServer, type SourceEdit } from '@smartplan/server';
 import { toClaudeHookResponse } from './claudeHookResponse.ts';
+import { extractMermaidBlocks, writeCheckHarness } from './mermaidCheck.ts';
 
 const [command, ...rest] = process.argv.slice(2);
 
@@ -54,6 +55,35 @@ async function serveCommand(args: string[]): Promise<void> {
   process.exit(0);
 }
 
+// Generate a browser harness that renders every Mermaid diagram in the plan. The agent opens it,
+// reads window.__mermaidCheck.failed, fixes the offending plan-src/<page>.md, and re-runs until
+// failedCount is 0 — before handing control back to the user.
+function checkMermaidCommand(args: string[]): void {
+  const srcDir = resolve(args[0] ?? '.');
+  const blocks = extractMermaidBlocks(srcDir);
+  if (blocks.length === 0) {
+    console.log('No Mermaid diagrams found.');
+    return;
+  }
+  const harness = writeCheckHarness(srcDir, blocks);
+  console.log(`${blocks.length} Mermaid diagram(s) across ${new Set(blocks.map((b) => b.pageId)).size} page(s).`);
+  for (const b of blocks) console.log(`  - plan-src/${b.pageId}.md:${b.line}`);
+
+  if (args.includes('--serve')) {
+    const html = readFileSync(harness, 'utf8');
+    const server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      fetch: () => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+    });
+    console.log(`\nHarness server: http://127.0.0.1:${server.port}/`);
+    console.log('Open it, read window.__mermaidCheck.failed, fix any failures, and re-run. Ctrl-C when done.');
+  } else {
+    console.log(`\nHarness: ${harness}`);
+    console.log('Serve it (or re-run with --serve) and read window.__mermaidCheck — fix failures and re-run.');
+  }
+}
+
 // ExitPlanMode hook entrypoint: read the PermissionRequest on stdin, review the SmartPlan at
 // SMARTPLAN_PLAN_DIR, and emit a ClaudeHookResponse on stdout (allow / deny + critique).
 async function hookClaudeCommand(): Promise<void> {
@@ -85,6 +115,9 @@ switch (command) {
   case 'serve':
     await serveCommand(rest);
     break;
+  case 'check-mermaid':
+    checkMermaidCommand(rest);
+    break;
   case 'hook':
     if (rest[0] === 'claude') await hookClaudeCommand();
     else {
@@ -93,7 +126,9 @@ switch (command) {
     }
     break;
   default:
-    console.error(`unknown command: ${command ?? '(none)'}\nusage: smartplan <compile|serve|hook claude> [srcDir]`);
+    console.error(
+      `unknown command: ${command ?? '(none)'}\nusage: smartplan <compile|serve|check-mermaid|hook claude> [srcDir]`,
+    );
     process.exit(1);
 }
 

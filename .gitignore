@@ -4,3 +4,4 @@
 *.log
 # external clone, not part of this repo
 planbridge/
+mermaid-check.html

@@ -71,6 +71,26 @@ flowchart LR
 </div>
 ```
 
+### Verify every diagram renders (before handing back to the user)
+
+Mermaid is easy to get subtly wrong — a `;` or `:` in a label, an arrow in message
+text, an unquoted special character — and a broken diagram renders as an error box,
+not a diagram. **Render every diagram in your browser and confirm it is correct before
+returning control to the user.** Do not rely on eyeballing the source.
+
+Loop until clean:
+
+1. Run the checker, which finds every `mermaid` block and serves a render harness:
+   `bun run app/packages/cli/src/index.ts check-mermaid <plan-dir> --serve`
+2. Open the printed URL in your browser and read `window.__mermaidCheck`. `failedCount`
+   must be `0`; each entry in `failed` names the `plan-src/<page>.md` file and line.
+3. Fix the offending diagram source and re-run. Repeat until `failedCount === 0` and every
+   diagram has produced an `svg`.
+
+Common fixes: replace `;` in labels/notes with `,` (Mermaid treats `;` as a statement
+separator), avoid literal `->`/`<…>` inside message text, and quote labels containing
+parentheses or punctuation.
+
 ## Assumptions & open questions
 
 A SmartPlan is generated from a half-defined brief. Every plan therefore makes assumptions. Surface them — don't bury them.
