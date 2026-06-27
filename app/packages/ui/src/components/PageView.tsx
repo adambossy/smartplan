@@ -36,27 +36,8 @@ export function PageView({ plan, page, contentRef, readSections, onToggleSection
     }
   };
 
-  const crumbs = breadcrumbTrail(plan, page);
-
   return (
     <div className="sp-page">
-      <p className="sp-crumbs">
-        {crumbs.map((c, i) => (
-          <span key={c.id}>
-            {i > 0 && <span className="sp-crumb-sep"> / </span>}
-            {c.id === page.id ? (
-              <span>{c.label}</span>
-            ) : (
-              <button type="button" className="sp-crumb-link" onClick={() => onNavigate(c.id)}>
-                {c.label}
-              </button>
-            )}
-          </span>
-        ))}
-      </p>
-
-      <p className="sp-eyebrow">{page.eyebrow}</p>
-
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div className="sp-content" ref={contentRef} onClick={onClick}>
         <header className="sp-page-header">
@@ -134,17 +115,6 @@ export function PageView({ plan, page, contentRef, readSections, onToggleSection
       </div>
     </div>
   );
-}
-
-function breadcrumbTrail(plan: CompiledPlan, page: CompiledPage): { id: string; label: string }[] {
-  const byId = new Map(plan.pages.map((p) => [p.id, p]));
-  const trail: { id: string; label: string }[] = [];
-  let current: CompiledPage | undefined = page;
-  while (current) {
-    trail.unshift({ id: current.id, label: current.id === plan.manifest.root.id ? plan.title : current.label });
-    current = current.parentId ? byId.get(current.parentId) : undefined;
-  }
-  return trail;
 }
 
 function resolveHrefToPageId(plan: CompiledPlan, href: string): string | null {
