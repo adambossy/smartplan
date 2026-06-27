@@ -1,0 +1,4 @@
+node_modules/
+dist/
+packages/ui/public/compiled-plan.json
+*.log

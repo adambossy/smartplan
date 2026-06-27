@@ -1,0 +1,12 @@
+{
+  "name": "@smartplan/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": { "smartplan": "./src/index.ts" },
+  "dependencies": {
+    "@smartplan/compiler": "workspace:*",
+    "@smartplan/critique": "workspace:*",
+    "@smartplan/server": "workspace:*",
+    "@smartplan/shared": "workspace:*"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run /Users/adambossy/code/smartplan/app/packages/cli/src/index.ts hook claude",
+            "timeout": 345600
+          }
+        ]
+      }
+    ]
+  }
+}

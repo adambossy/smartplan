@@ -1,0 +1,12 @@
+{
+  "name": "@smartplan/compiler",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@smartplan/shared": "workspace:*",
+    "marked": "^14.1.0"
+  }
+}

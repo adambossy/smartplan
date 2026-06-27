@@ -1,0 +1,11 @@
+{
+  "name": "@smartplan/anchor",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@smartplan/shared": "workspace:*"
+  }
+}

@@ -1,0 +1,6 @@
+.DS_Store
+.cache/
+.playwright-mcp/
+*.log
+# external clone, not part of this repo
+planbridge/

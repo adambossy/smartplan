@@ -1,0 +1,92 @@
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { compilePlan } from '@smartplan/compiler';
+import { formatAgentResponse } from '@smartplan/critique';
+import { startReviewServer } from '@smartplan/server';
+import { toClaudeHookResponse } from './claudeHookResponse.ts';
+
+const [command, ...rest] = process.argv.slice(2);
+
+// The built single-file UI lives next to this package, regardless of the caller's cwd.
+const UI_HTML_PATH = resolve(import.meta.dir, '../../ui/dist/index.html');
+
+function compileCommand(args: string[]): void {
+  const srcDir = resolve(args[0] ?? '.');
+  const outIndex = args.indexOf('--out');
+  const out = resolve(
+    outIndex >= 0 && args[outIndex + 1] ? args[outIndex + 1]! : 'packages/ui/public/compiled-plan.json',
+  );
+  const plan = compilePlan(srcDir);
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, JSON.stringify(plan, null, 2));
+  console.log(`compiled ${plan.pages.length} pages from ${srcDir}\n→ ${out}`);
+}
+
+async function serveCommand(args: string[]): Promise<void> {
+  const srcDir = resolve(args[0] ?? '.');
+  const plan = compilePlan(srcDir);
+  const server = startReviewServer({ plan, html: readFileSync(UI_HTML_PATH, 'utf8') });
+  console.log(`SmartPlan review server: ${server.url}`);
+  console.log('Open it in your browser. Waiting for you to Approve or Incorporate…');
+  openBrowser(server.url);
+  const submission = await server.result;
+  server.stop();
+  console.log('\n===== agent-facing critique =====\n');
+  console.log(formatAgentResponse(plan, submission));
+  process.exit(0);
+}
+
+// ExitPlanMode hook entrypoint: read the PermissionRequest on stdin, review the SmartPlan at
+// SMARTPLAN_PLAN_DIR, and emit a ClaudeHookResponse on stdout (allow / deny + critique).
+async function hookClaudeCommand(): Promise<void> {
+  await readStdin(); // PermissionRequest payload; the tree under review is configured below.
+  const srcEnv = process.env.SMARTPLAN_PLAN_DIR;
+  if (!srcEnv) {
+    // No SmartPlan configured for this session — let the harness proceed normally.
+    process.stdout.write('{}');
+    return;
+  }
+  const plan = compilePlan(resolve(srcEnv));
+  const server = startReviewServer({ plan, html: readFileSync(UI_HTML_PATH, 'utf8') });
+  process.stderr.write(`SmartPlan review: ${server.url}\n`);
+  openBrowser(server.url);
+  const submission = await server.result;
+  server.stop();
+  process.stdout.write(JSON.stringify(toClaudeHookResponse(plan, submission)));
+}
+
+switch (command) {
+  case 'compile':
+    compileCommand(rest);
+    break;
+  case 'serve':
+    await serveCommand(rest);
+    break;
+  case 'hook':
+    if (rest[0] === 'claude') await hookClaudeCommand();
+    else {
+      console.error('usage: smartplan hook claude');
+      process.exit(1);
+    }
+    break;
+  default:
+    console.error(`unknown command: ${command ?? '(none)'}\nusage: smartplan <compile|serve|hook claude> [srcDir]`);
+    process.exit(1);
+}
+
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) return '';
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function openBrowser(url: string): void {
+  if (process.env.SMARTPLAN_NO_OPEN) return;
+  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  try {
+    Bun.spawn([cmd, url], { stdout: 'ignore', stderr: 'ignore' });
+  } catch {
+    // non-fatal: the URL is printed for manual opening
+  }
+}

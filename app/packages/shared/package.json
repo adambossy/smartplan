@@ -1,0 +1,13 @@
+{
+  "name": "@smartplan/shared",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./annotationSchema": "./src/annotationSchema.ts",
+    "./planSchema": "./src/planSchema.ts",
+    "./time": "./src/time.ts"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
+}
