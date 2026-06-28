@@ -1,0 +1,5 @@
+#!/bin/sh
+# Dev wrapper: run the SmartPlan CLI straight from TypeScript source via Bun, so
+# code changes are picked up with no build step. Symlink this onto your PATH:
+#   ln -sf "$PWD/bin/smartplan" ~/.local/bin/smartplan   # (or /usr/local/bin)
+exec bun run "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/packages/cli/src/index.ts" "$@"
