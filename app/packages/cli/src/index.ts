@@ -38,20 +38,36 @@ function compileCommand(args: string[]): void {
 }
 
 async function serveCommand(args: string[]): Promise<void> {
-  const srcDir = resolve(args[0] ?? '.');
-  const plan = compilePlan(srcDir);
-  const server = startReviewServer({
-    plan,
-    html: readFileSync(UI_HTML_PATH, 'utf8'),
-    onEditSource: makeEditHandler(srcDir),
+  const dirs = args.filter((a) => !a.startsWith('--')).map((d) => resolve(d));
+  if (dirs.length === 0) dirs.push(resolve('.'));
+
+  const html = readFileSync(UI_HTML_PATH, 'utf8');
+  const seen = new Set<string>();
+  const plans = dirs.map((dir) => {
+    const plan = compilePlan(dir);
+    let planId = plan.planId;
+    while (seen.has(planId)) planId = `${plan.planId}-${seen.size + 1}`;
+    seen.add(planId);
+    return { dir, planId, plan: { ...plan, planId }, onEditSource: makeEditHandler(dir) };
   });
+
+  const server = startReviewServer({ plans, html });
   console.log(`SmartPlan review server: ${server.url}`);
-  console.log('Open it in your browser. Waiting for you to Approve or Incorporate…');
-  openBrowser(server.url);
-  const submission = await server.result;
+  for (const p of plans) {
+    const url = server.planUrl(p.planId);
+    console.log(`  ${p.plan.title} → ${url}`);
+    openBrowser(url);
+  }
+  console.log(`\nWaiting for all ${plans.length} plan(s) to be reviewed (Approve or Incorporate each)…`);
+
+  const results = await server.allResults;
+  for (const p of plans) {
+    const submission = results.get(p.planId);
+    if (!submission) continue;
+    console.log(`\n===== ${p.plan.title} =====\n`);
+    console.log(formatAgentResponse(p.plan, submission));
+  }
   server.stop();
-  console.log('\n===== agent-facing critique =====\n');
-  console.log(formatAgentResponse(plan, submission));
   process.exit(0);
 }
 
@@ -97,13 +113,13 @@ async function hookClaudeCommand(): Promise<void> {
   const srcDir = resolve(srcEnv);
   const plan = compilePlan(srcDir);
   const server = startReviewServer({
-    plan,
+    plans: [{ planId: plan.planId, plan, onEditSource: makeEditHandler(srcDir) }],
     html: readFileSync(UI_HTML_PATH, 'utf8'),
-    onEditSource: makeEditHandler(srcDir),
   });
-  process.stderr.write(`SmartPlan review: ${server.url}\n`);
-  openBrowser(server.url);
-  const submission = await server.result;
+  const url = server.planUrl(plan.planId);
+  process.stderr.write(`SmartPlan review: ${url}\n`);
+  openBrowser(url);
+  const submission = await server.resultFor(plan.planId);
   server.stop();
   process.stdout.write(JSON.stringify(toClaudeHookResponse(plan, submission)));
 }

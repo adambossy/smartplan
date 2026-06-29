@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   type CompiledPage,
   type CompiledPlan,
@@ -26,8 +26,10 @@ export function compilePlan(srcDir: string): CompiledPlan {
   const pages: CompiledPage[] = flattenTree(manifest.root).map((node) => compileNode(srcDir, node, manifest, parents, labels));
 
   return {
+    // planId is derived from the source directory (unique per plan), not the title,
+    // so two plans with similar titles don't collide in localStorage or the server registry.
     title: manifest.title,
-    planId: slugify(manifest.title),
+    planId: slugify(basename(srcDir.replace(/\/+$/, ''))) || slugify(manifest.title),
     manifest,
     pages,
   };

@@ -3,7 +3,8 @@ import type { CompiledPlan } from '@smartplan/shared/planSchema';
 // The server serves the compiled plan at /payload; in Vite dev it's a static file
 // under public/. Try the server route first, then the dev fallback.
 export async function loadCompiledPlan(): Promise<CompiledPlan> {
-  for (const url of ['/payload', '/compiled-plan.json']) {
+  // Relative URLs so the page works when served under /p/<planId>/ (multi-plan) or at / (dev).
+  for (const url of ['payload', 'compiled-plan.json']) {
     try {
       const res = await fetch(url);
       if (res.ok) return (await res.json()) as CompiledPlan;
@@ -24,7 +25,7 @@ export interface SourceEdit {
 /** Live-sync an inline edit to the datastore. Returns the line-count delta, or null if no server. */
 export async function postSourceEdit(edit: SourceEdit): Promise<{ lineDelta: number } | null> {
   try {
-    const res = await fetch('/source', {
+    const res = await fetch('source', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(edit),

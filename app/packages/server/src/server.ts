@@ -2,12 +2,6 @@ import { type AnnotationSubmission, AnnotationSubmissionSchema } from '@smartpla
 import type { CompiledPlan } from '@smartplan/shared/planSchema';
 import { z } from 'zod';
 
-export interface ReviewServer {
-  url: string;
-  result: Promise<AnnotationSubmission>;
-  stop: () => void;
-}
-
 export interface SourceEdit {
   pageId: string;
   startLine: number;
@@ -15,17 +9,30 @@ export interface SourceEdit {
   text: string;
 }
 
-export interface StartReviewServerOptions {
+export interface PlanEntry {
+  planId: string;
   plan: CompiledPlan;
-  /** The built single-file UI HTML. */
+  /** Persist an inline edit back to this plan's datastore; returns the line delta + recompiled plan. */
+  onEditSource?: (edit: SourceEdit) => { lineDelta: number; plan: CompiledPlan };
+}
+
+export interface ReviewServer {
+  /** Index URL listing all served plans. */
+  url: string;
+  /** Per-plan review URL (the page the browser opens). */
+  planUrl: (planId: string) => string;
+  /** Resolves when this one plan is submitted. */
+  resultFor: (planId: string) => Promise<AnnotationSubmission>;
+  /** Resolves when every served plan has been submitted once (Option B). */
+  allResults: Promise<Map<string, AnnotationSubmission>>;
+  stop: () => void;
+}
+
+export interface StartReviewServerOptions {
+  plans: PlanEntry[];
+  /** The built single-file UI HTML, served for every plan. */
   html: string;
   port?: number;
-  /**
-   * Persist an inline edit back to the datastore. Returns how many lines the edit added/removed
-   * (so the client can keep its source-line map in sync) and the recompiled plan, which becomes
-   * the payload served to any later load. Omit to make the plan read-only.
-   */
-  onEditSource?: (edit: SourceEdit) => { lineDelta: number; plan: CompiledPlan };
 }
 
 const SourceEditSchema = z.object({
@@ -35,38 +42,68 @@ const SourceEditSchema = z.object({
   text: z.string(),
 });
 
-// Ephemeral, per-review blocking server — lifted from ContextBridge's annotation server. Binds
-// 127.0.0.1 on an OS-assigned port, serves the tree + UI, resolves `result` once the browser
-// POSTs /submit, and (if onEditSource is provided) live-syncs inline edits to the datastore.
-export function startReviewServer(options: StartReviewServerOptions): ReviewServer {
-  const { plan, html, port = 0, onEditSource } = options;
-  let currentPlan = plan;
+interface PlanState {
+  plan: CompiledPlan; // mutable: updated as inline edits recompile
+  onEditSource?: (edit: SourceEdit) => { lineDelta: number; plan: CompiledPlan };
+  resolve: (submission: AnnotationSubmission) => void;
+  promise: Promise<AnnotationSubmission>;
+  done: boolean;
+}
 
-  let resolveResult!: (submission: AnnotationSubmission) => void;
-  const result = new Promise<AnnotationSubmission>((resolve) => {
-    resolveResult = resolve;
+// Ephemeral, multi-plan review server. Serves any number of plans from one process, each under
+// /p/<planId>/, blocking until every plan has been submitted once. Lifts ContextBridge's
+// 127.0.0.1:0 + setTimeout(0)-flush-before-stop mechanics; extends them to a plan registry.
+export function startReviewServer(options: StartReviewServerOptions): ReviewServer {
+  const { plans, html, port = 0 } = options;
+
+  const state = new Map<string, PlanState>();
+  const collected = new Map<string, AnnotationSubmission>();
+  let resolveAll!: (m: Map<string, AnnotationSubmission>) => void;
+  const allResults = new Promise<Map<string, AnnotationSubmission>>((resolve) => {
+    resolveAll = resolve;
   });
+
+  for (const entry of plans) {
+    let resolve!: (submission: AnnotationSubmission) => void;
+    const promise = new Promise<AnnotationSubmission>((r) => {
+      resolve = r;
+    });
+    state.set(entry.planId, { plan: entry.plan, onEditSource: entry.onEditSource, resolve, promise, done: false });
+  }
+  if (state.size === 0) resolveAll(collected);
 
   const json = (body: unknown) =>
     new Response(JSON.stringify(body), {
       headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
     });
+  const htmlResponse = () => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+  const notFound = () => new Response('not found', { status: 404 });
 
   const server = Bun.serve({
     port,
     hostname: '127.0.0.1',
     routes: {
-      '/': () => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
-      '/payload': () => json(currentPlan),
-      '/compiled-plan.json': () => json(currentPlan),
-      '/source': { POST: async (req) => handleSourceEdit(req) },
-      '/submit': { POST: async (req) => handleSubmit(req, resolveResult) },
+      '/': () => new Response(indexHtml(state), { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+      '/p/:planId': (req) =>
+        new Response(null, { status: 302, headers: { location: `/p/${req.params.planId}/` } }),
+      '/p/:planId/': (req) => (state.has(req.params.planId) ? htmlResponse() : notFound()),
+      '/p/:planId/payload': (req) => planJson(req.params.planId),
+      '/p/:planId/compiled-plan.json': (req) => planJson(req.params.planId),
+      '/p/:planId/source': { POST: (req) => handleSourceEdit(req.params.planId, req) },
+      '/p/:planId/submit': { POST: (req) => handleSubmit(req.params.planId, req) },
     },
-    fetch: () => new Response('not found', { status: 404 }),
+    fetch: () => notFound(),
   });
 
-  async function handleSourceEdit(req: Request): Promise<Response> {
-    if (!onEditSource) return new Response('editing disabled', { status: 405 });
+  function planJson(planId: string): Response {
+    const s = state.get(planId);
+    return s ? json(s.plan) : notFound();
+  }
+
+  async function handleSourceEdit(planId: string, req: Request): Promise<Response> {
+    const s = state.get(planId);
+    if (!s) return notFound();
+    if (!s.onEditSource) return new Response('editing disabled', { status: 405 });
     let body: unknown;
     try {
       body = await req.json();
@@ -76,39 +113,60 @@ export function startReviewServer(options: StartReviewServerOptions): ReviewServ
     const parsed = SourceEditSchema.safeParse(body);
     if (!parsed.success) return new Response('invalid edit', { status: 400 });
     try {
-      const { lineDelta, plan: updated } = onEditSource(parsed.data);
-      currentPlan = updated;
+      const { lineDelta, plan } = s.onEditSource(parsed.data);
+      s.plan = plan;
       return json({ ok: true, lineDelta });
     } catch (error) {
       return new Response(`edit failed: ${String(error)}`, { status: 500 });
     }
   }
 
+  async function handleSubmit(planId: string, req: Request): Promise<Response> {
+    const s = state.get(planId);
+    if (!s) return notFound();
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response('invalid JSON', { status: 400 });
+    }
+    const parsed = AnnotationSubmissionSchema.safeParse(body);
+    if (!parsed.success) return new Response('invalid submission', { status: 400 });
+
+    // Defer one macrotask so Bun flushes the 204 before any awaiter unblocks (matches the
+    // single-plan flush trick). Only the first submission per plan counts toward allResults.
+    setTimeout(() => {
+      s.resolve(parsed.data);
+      if (!s.done) {
+        s.done = true;
+        collected.set(planId, parsed.data);
+        if (collected.size === state.size) resolveAll(collected);
+      }
+    }, 0);
+    return new Response(null, { status: 204, headers: { connection: 'close' } });
+  }
+
+  const baseUrl = `http://127.0.0.1:${server.port}`;
   return {
-    url: `http://127.0.0.1:${server.port}/`,
-    result,
+    url: `${baseUrl}/`,
+    planUrl: (planId) => `${baseUrl}/p/${planId}/`,
+    resultFor: (planId) => state.get(planId)?.promise ?? Promise.reject(new Error(`unknown plan: ${planId}`)),
+    allResults,
     stop: () => server.stop(true),
   };
 }
 
-async function handleSubmit(
-  req: Request,
-  resolveResult: (submission: AnnotationSubmission) => void,
-): Promise<Response> {
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return new Response('invalid JSON', { status: 400 });
-  }
+function indexHtml(state: Map<string, PlanState>): string {
+  const items = [...state.entries()]
+    .map(([planId, s]) => `<li><a href="/p/${planId}/">${escapeHtml(s.plan.title)}</a></li>`)
+    .join('\n');
+  return `<!doctype html><meta charset="utf-8"><title>SmartPlan review</title>
+<style>body{font-family:ui-sans-serif,system-ui,sans-serif;max-width:640px;margin:64px auto;padding:0 24px;color:#1a1814}
+h1{font-size:20px}li{margin:8px 0}a{color:#b8552a}</style>
+<h1>SmartPlan review — ${state.size} plan${state.size === 1 ? '' : 's'}</h1>
+<ul>${items}</ul>`;
+}
 
-  const parsed = AnnotationSubmissionSchema.safeParse(body);
-  if (!parsed.success) {
-    return new Response('invalid submission', { status: 400 });
-  }
-
-  // Defer one macrotask so Bun flushes the 204 before the CLI tears the server down with
-  // stop(true) — otherwise the browser sees a connection reset.
-  setTimeout(() => resolveResult(parsed.data), 0);
-  return new Response(null, { status: 204, headers: { connection: 'close' } });
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

@@ -62,7 +62,7 @@ function Review({ plan }: { plan: CompiledPlan }) {
     setSubmitting(true);
     const submission = review.buildSubmission(status);
     try {
-      await fetch('/submit', {
+      await fetch('submit', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(submission),
